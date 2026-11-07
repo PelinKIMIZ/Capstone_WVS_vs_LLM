@@ -1,0 +1,5 @@
+"Metric","Value"
+"Overall exact accuracy",55.62
+"None-selected accuracy",63.58
+"Selected exact accuracy",47.7
+"Threshold",0.03
