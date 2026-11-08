@@ -489,7 +489,8 @@ random_predictions_1000 <- vapply(
     sample(candidates, size = 1)
   },
   character(1)
-  
+)
+
   # STEP 27: Inspect none_selected decisions
   
   # Extract decisions where the LLM selected nothing
@@ -555,7 +556,6 @@ random_predictions_1000 <- vapply(
   sum(is.na(none_max_scores))
   
   
-)
 
 # Calculate random baseline accuracy
 random_correct_1000 <- !is.na(random_predictions_1000) &
@@ -786,71 +786,9 @@ cat("Prediction:", test_none, "\n")
 cat("Actual: none_selected\n")
 
 
+# STEP 32: Create helper function and extract independent test sample
 
-# STEP 32: Fix incompatible list columns
-
-# Convert list columns to ordinary R lists
-fix_columns <- function(df) {
-  df <- as.data.frame(df)
-  
-  df$memory_ids <- lapply(
-    df$memory_ids, as.character
-  )
-  
-  df$shown_candidates <- lapply(
-    df$shown_candidates, as.character
-  )
-  
-  df
-}
-
-# Fix both datasets
-selected_test_fixed <- fix_columns(selected_test)
-none_test_fixed <- fix_columns(none_test)
-
-# Combine the datasets
-test_data <- rbind(
-  selected_test_fixed,
-  none_test_fixed
-)
-
-# Check the results
-print(dim(test_data))
-print(table(test_data$decision))
-
-# STEP 33: Check overlap with previous samples
-
-# Compare original row identifiers
-selected_overlap <- sum(
-  rownames(selected_test) %in% rownames(evaluation_1000)
-)
-
-none_overlap <- sum(
-  rownames(none_test) %in% rownames(none_sample)
-)
-
-cat("Selected overlap:", selected_overlap, "\n")
-cat("None-selected overlap:", none_overlap, "\n")
-
-
-# STEP 34: Inspect row identifiers
-
-cat("Selected tuning rows:\n")
-print(head(rownames(evaluation_1000)))
-
-cat("Selected test rows:\n")
-print(head(rownames(selected_test)))
-
-cat("None tuning rows:\n")
-print(head(rownames(none_sample)))
-
-cat("None test rows:\n")
-print(head(rownames(none_test)))
-
-
-# STEP 35: Check actual decision overlap
-
-# Create unique identifiers using the original decision records
+# Helper function for unique decision keys
 get_decision_keys <- function(df) {
   vapply(seq_len(nrow(df)), function(i) {
     paste(
@@ -860,47 +798,60 @@ get_decision_keys <- function(df) {
       df$agent_id[i],
       df$time_step[i],
       df$seed[i],
+      df$source[i],
       sep = "|"
     )
   }, character(1))
 }
 
-# Compare tuning and test decisions
-selected_overlap <- sum(
-  get_decision_keys(selected_test) %in%
-    get_decision_keys(evaluation_1000)
-)
-
-none_overlap <- sum(
-  get_decision_keys(none_test) %in%
-    get_decision_keys(none_sample)
-)
-
-cat("Selected overlap:", selected_overlap, "\n")
-cat("None-selected overlap:", none_overlap, "\n")
-
-
-# STEP 36: Remove overlapping decisions
-
-# Identify previous evaluation records
+# Identify tuning decision keys to prevent data leakage
 used_keys <- unique(c(
   get_decision_keys(evaluation_1000),
   get_decision_keys(none_sample)
 ))
 
-# Remove overlapping records
-test_keys <- get_decision_keys(test_data)
-
-test_data_clean <- test_data[
-  !test_keys %in% used_keys,
-  ,
-  drop = FALSE
+# Filter out tuning decisions from pools
+selected_test_pool <- selected_data[
+  !get_decision_keys(selected_data) %in% used_keys,
 ]
 
-# Check remaining test records
-cat("Original test decisions:", nrow(test_data), "\n")
-cat("Remaining decisions:", nrow(test_data_clean), "\n")
+none_test_pool <- none_data[
+  !get_decision_keys(none_data) %in% used_keys,
+]
 
+# Draw 1,000 NEW independent decisions for each category
+set.seed(456)
+
+selected_test <- selected_test_pool[
+  sample(seq_len(nrow(selected_test_pool)), 1000),
+]
+
+none_test <- none_test_pool[
+  sample(seq_len(nrow(none_test_pool)), 1000),
+]
+
+# Convert list columns to ordinary R lists
+fix_columns <- function(df) {
+  df <- as.data.frame(df)
+  if ("memory_ids" %in% names(df)) {
+    df$memory_ids <- lapply(df$memory_ids, as.character)
+  }
+  if ("shown_candidates" %in% names(df)) {
+    df$shown_candidates <- lapply(df$shown_candidates, as.character)
+  }
+  df
+}
+
+selected_test_fixed <- fix_columns(selected_test)
+none_test_fixed <- fix_columns(none_test)
+
+# Combine into clean test dataset
+test_data_clean <- dplyr::bind_rows(
+  selected_test_fixed,
+  none_test_fixed
+)
+
+cat("Final independent test decisions:", nrow(test_data_clean), "\n")
 print(table(test_data_clean$decision))
 
 
@@ -1020,142 +971,7 @@ write.csv(
 
 cat("Evaluation results saved successfully!\n")
 
-# STEP 41: Verify decision identifiers
-
-# Check whether our identifiers are unique
-all_keys <- get_decision_keys(decisions)
-
-cat("Total decisions:", length(all_keys), "\n")
-
-cat("Unique identifiers:",
-    length(unique(all_keys)), "\n")
-
-cat("Duplicate identifiers:",
-    sum(duplicated(all_keys)), "\n")
-
-
-# STEP 42: Investigate duplicate decision identifiers
-
-# Find the first repeated identifier
-duplicate_key <- all_keys[which(duplicated(all_keys))[1]]
-
-# Find records sharing this identifier
-duplicate_rows <- which(all_keys == duplicate_key)
-
-# Display the matching records
-print(
-  decisions[
-    head(duplicate_rows, 10),
-    c(
-      "run_id_desc",
-      "N",
-      "M",
-      "agent_id",
-      "time_step",
-      "seed",
-      "source",
-      "decision",
-      "selected_statement_id"
-    )
-  ]
-)
-
-
-# STEP 43: Improve decision identifiers
-
-get_decision_keys <- function(df) {
-  vapply(seq_len(nrow(df)), function(i) {
-    paste(
-      df$run_id_desc[i],
-      df$N[i],
-      df$M[i],
-      df$agent_id[i],
-      df$time_step[i],
-      df$seed[i],
-      df$source[i],
-      sep = "|"
-    )
-  }, character(1))
-}
-
-# Check uniqueness again
-all_keys <- get_decision_keys(decisions)
-
-cat("Total decisions:", length(all_keys), "\n")
-cat("Unique identifiers:", length(unique(all_keys)), "\n")
-cat("Duplicate identifiers:", sum(duplicated(all_keys)), "\n")
-
-
-# STEP 44: Recheck overlap with unique identifiers
-
-# Identify decisions used previously
-used_keys <- unique(c(
-  get_decision_keys(evaluation_1000),
-  get_decision_keys(none_sample)
-))
-
-# Recheck our 1,000 test decisions
-test_keys <- get_decision_keys(test_data)
-
-overlap_count <- sum(test_keys %in% used_keys)
-
-cat("Overlapping test decisions:", overlap_count, "\n")
-
-# Create the corrected independent test dataset
-test_data_final <- test_data[
-  !test_keys %in% used_keys,
-  ,
-  drop = FALSE
-]
-
-cat("Final test decisions:", nrow(test_data_final), "\n")
-
-print(table(test_data_final$decision))
-
-
-# STEP 45: Final threshold model evaluation
-
-# Predict outcomes on the corrected test sample
-final_predictions <- vapply(
-  seq_len(nrow(test_data_final)),
-  function(i) {
-    predict_correlation_threshold(
-      memory_ids = test_data_final$memory_ids[[i]],
-      candidate_ids = test_data_final$shown_candidates[[i]],
-      relationship_matrix = cor_matrix,
-      threshold = 0.03
-    )
-  },
-  character(1)
-)
-
-# Actual outcomes
-final_actual <- ifelse(
-  test_data_final$decision == "none_selected",
-  "none_selected",
-  test_data_final$selected_statement_id
-)
-
-# Exact-match accuracy
-final_correct <- !is.na(final_predictions) &
-  final_predictions == final_actual
-
-final_accuracy <- mean(final_correct) * 100
-
-# Display results
-cat("Final test decisions:", length(final_predictions), "\n")
-cat("Correct predictions:", sum(final_correct), "\n")
-cat("Final exact accuracy:", round(final_accuracy, 2), "%\n")
-cat("Missing predictions:", sum(is.na(final_predictions)), "\n")
-
-# Save final results
-test_data_final$prediction <- final_predictions
-test_data_final$correct <- final_correct
-
-saveRDS(test_data_final, "final_threshold_evaluation.rds")
-
-
-# STEP 46: Save model comparison summary
+# STEP 41: Save final model comparison summary
 
 model_summary <- data.frame(
   Model = c(
@@ -1168,16 +984,15 @@ model_summary <- data.frame(
     random_accuracy_1000,
     cor_accuracy_1000,
     pca_accuracy_1000,
-    final_accuracy
+    round(threshold_accuracy, 2)
   ),
-  Test_Decisions = c(1000, 1000, 1000, 996),
+  Test_Decisions = c(1000, 1000, 1000, nrow(test_data_clean)),
   Evaluation_Type = c(
     "Selected only",
     "Selected only",
     "Selected only",
-    "Selected and none",
     "Selected and none"
-  )[1:4]
+  )
 )
 
 print(model_summary)
@@ -1188,4 +1003,4 @@ write.csv(
   row.names = FALSE
 )
 
-cat("Model comparison saved successfully!\n")
+cat("Final model comparison saved successfully!\n")

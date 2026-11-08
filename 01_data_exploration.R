@@ -10,7 +10,7 @@ decisions <- read_parquet("decisions_from_json.parquet")
 
 # Load World Values Survey data
 wvs_data <- read_csv(
-  "WVS_Cross-National_Wave_7_csv_v6_0.csv"
+  "WVS_Wave_7.csv"
 )
 
 # Inspect the datasets
