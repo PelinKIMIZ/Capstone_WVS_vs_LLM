@@ -1,33 +1,25 @@
 # Capstone: WVS vs LLM Validation
 
-Collaborative repository for the Capstone project evaluating LLM agent simulation decisions against World Values Survey (WVS) Wave 7 human survey data.
+Collaborative repository for the MSc Data Science for Society and Business Capstone project evaluating LLM agent worldview decisions in the **LLM Filter Bubble Model** (Lorenz & Gunes) against empirical **World Values Survey (WVS) Wave 7** human survey data.
 
----
-
-## 1. Important Note on Datasets (Do Not Push Data!)
-
-Raw data files are large and strictly excluded via `.gitignore`. 
-
-Please create a local `data/` folder on your machine and place the following three files inside it:
-- `statements_meta.parquet` (100 statements mapped to 70 WVS questions)
-- `decisions_from_json.parquet` (1.44M decision events from 108 simulation runs)
-- `WVS_Wave_7.csv` (N=97,220 survey respondents)
-
----
+## 1. Important Note on Datasets (Do Not Push Raw Data!)
+Raw data files are large and strictly excluded via `.gitignore`.  
+Create a local `data/` folder on your machine and place the following three files inside it before running the scripts:
+- `statements_meta.parquet` (100 simulation statements mapped to 70 WVS Wave 7 questions)
+- `decisions_from_json.parquet` (1,440,000 agent decision turns across 108 simulation runs)
+- `WVS_Wave_7.csv` ($N = 97,220$ survey respondents)
 
 ## 2. Repository Structure
-
 ```text
 Capstone_WVS_vs_LLM/
 │
-├── .gitignore          # Ignores data files (*.parquet, *.csv) and local caches
-├── README.md           # Setup and project structure guide
+├── .gitignore                        # Ignores large data files (*.parquet, *.csv) and caches
+├── README.md                         # Project documentation and setup guide
 │
-├── data/               # Local folder for datasets (NOT tracked by Git)
+├── 01_data_exploration.R             # WVS [0, 1] normalization, 100x100 Spearman matrix & initial validation
+├── 02_model_comparison.R             # Run-independent split (86 tuning / 22 test runs), threshold tuning & evaluation
 │
-├── scripts/            # Shared R and Python scripts
-│   ├── read_data.py                    # Python data check (pandas, pyarrow)
-│   └── work_read_data_and_first_look.r # R data check (arrow, dplyr, readr)
-│
-├── docs/               # Meeting notes, proposal drafts, papers
-└── results/            # Generated figures, tables, and exported metrics
+├── correlation_matrix.rds            # Exported 100x100 empirical WVS Spearman correlation matrix
+├── final_threshold_evaluation.rds    # Saved out-of-sample evaluation metrics (threshold = 0.04)
+├── final_model_comparison.png        # Accuracy comparison: WVS Correlation (66.6%) vs. 1D PCA (53.8%)
+└── final_confusion_matrix.png        # Out-of-sample confusion matrix (n = 1,000, threshold = 0.04)
