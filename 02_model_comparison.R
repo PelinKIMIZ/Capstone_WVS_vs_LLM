@@ -490,7 +490,6 @@ random_predictions_1000 <- vapply(
   },
   character(1)
 )
-
   # STEP 27: Inspect none_selected decisions
   
   # Extract decisions where the LLM selected nothing
@@ -556,7 +555,6 @@ random_predictions_1000 <- vapply(
   sum(is.na(none_max_scores))
   
   
-
 # Calculate random baseline accuracy
 random_correct_1000 <- !is.na(random_predictions_1000) &
   random_predictions_1000 == evaluation_1000$selected_statement_id
@@ -786,9 +784,126 @@ cat("Prediction:", test_none, "\n")
 cat("Actual: none_selected\n")
 
 
-# STEP 32: Create helper function and extract independent test sample
 
-# Helper function for unique decision keys
+# STEP 32: Fix incompatible list columns
+
+# Convert list columns to ordinary R lists
+fix_columns <- function(df) {
+  df <- as.data.frame(df)
+  
+  df$memory_ids <- lapply(
+    df$memory_ids, as.character
+  )
+  
+  df$shown_candidates <- lapply(
+    df$shown_candidates, as.character
+  )
+  
+  df
+}
+
+# Load the original independent run split
+run_split <- readRDS("evaluation_run_split.rds")
+
+tuning_run_ids <- run_split$tuning_run_ids
+testing_run_ids <- run_split$testing_run_ids
+
+# Create independent datasets
+tuning_data <- decisions[
+  decisions$run_id_desc %in% tuning_run_ids,
+  ,
+  drop = FALSE
+]
+
+testing_data <- decisions[
+  decisions$run_id_desc %in% testing_run_ids,
+  ,
+  drop = FALSE
+]
+
+cat("Tuning records:", nrow(tuning_data), "\n")
+cat("Testing records:", nrow(testing_data), "\n")
+
+# Create the two test samples
+
+set.seed(123)
+
+selected_test <- testing_data[
+  testing_data$decision == "selected",
+  ,
+  drop = FALSE
+]
+
+none_test <- testing_data[
+  testing_data$decision == "none_selected",
+  ,
+  drop = FALSE
+]
+
+selected_test <- selected_test[
+  sample(seq_len(nrow(selected_test)), 500),
+  ,
+  drop = FALSE
+]
+
+none_test <- none_test[
+  sample(seq_len(nrow(none_test)), 500),
+  ,
+  drop = FALSE
+]
+
+cat("Selected test:", nrow(selected_test), "\n")
+cat("None test:", nrow(none_test), "\n")
+
+
+
+# Fix both datasets
+selected_test_fixed <- fix_columns(selected_test)
+none_test_fixed <- fix_columns(none_test)
+
+# Combine the datasets
+test_data <- rbind(
+  selected_test_fixed,
+  none_test_fixed
+)
+
+# Check the results
+print(dim(test_data))
+print(table(test_data$decision))
+
+# STEP 33: Check overlap with previous samples
+
+# Compare original row identifiers
+selected_overlap <- sum(
+  rownames(selected_test) %in% rownames(evaluation_1000)
+)
+
+none_overlap <- sum(
+  rownames(none_test) %in% rownames(none_sample)
+)
+
+cat("Selected overlap:", selected_overlap, "\n")
+cat("None-selected overlap:", none_overlap, "\n")
+
+
+# STEP 34: Inspect row identifiers
+
+cat("Selected tuning rows:\n")
+print(head(rownames(evaluation_1000)))
+
+cat("Selected test rows:\n")
+print(head(rownames(selected_test)))
+
+cat("None tuning rows:\n")
+print(head(rownames(none_sample)))
+
+cat("None test rows:\n")
+print(head(rownames(none_test)))
+
+
+# STEP 35: Check actual decision overlap
+
+# Create unique identifiers using the original decision records
 get_decision_keys <- function(df) {
   vapply(seq_len(nrow(df)), function(i) {
     paste(
@@ -798,60 +913,47 @@ get_decision_keys <- function(df) {
       df$agent_id[i],
       df$time_step[i],
       df$seed[i],
-      df$source[i],
       sep = "|"
     )
   }, character(1))
 }
 
-# Identify tuning decision keys to prevent data leakage
+# Compare tuning and test decisions
+selected_overlap <- sum(
+  get_decision_keys(selected_test) %in%
+    get_decision_keys(evaluation_1000)
+)
+
+none_overlap <- sum(
+  get_decision_keys(none_test) %in%
+    get_decision_keys(none_sample)
+)
+
+cat("Selected overlap:", selected_overlap, "\n")
+cat("None-selected overlap:", none_overlap, "\n")
+
+
+# STEP 36: Remove overlapping decisions
+
+# Identify previous evaluation records
 used_keys <- unique(c(
   get_decision_keys(evaluation_1000),
   get_decision_keys(none_sample)
 ))
 
-# Filter out tuning decisions from pools
-selected_test_pool <- selected_data[
-  !get_decision_keys(selected_data) %in% used_keys,
+# Remove overlapping records
+test_keys <- get_decision_keys(test_data)
+
+test_data_clean <- test_data[
+  !test_keys %in% used_keys,
+  ,
+  drop = FALSE
 ]
 
-none_test_pool <- none_data[
-  !get_decision_keys(none_data) %in% used_keys,
-]
+# Check remaining test records
+cat("Original test decisions:", nrow(test_data), "\n")
+cat("Remaining decisions:", nrow(test_data_clean), "\n")
 
-# Draw 1,000 NEW independent decisions for each category
-set.seed(456)
-
-selected_test <- selected_test_pool[
-  sample(seq_len(nrow(selected_test_pool)), 1000),
-]
-
-none_test <- none_test_pool[
-  sample(seq_len(nrow(none_test_pool)), 1000),
-]
-
-# Convert list columns to ordinary R lists
-fix_columns <- function(df) {
-  df <- as.data.frame(df)
-  if ("memory_ids" %in% names(df)) {
-    df$memory_ids <- lapply(df$memory_ids, as.character)
-  }
-  if ("shown_candidates" %in% names(df)) {
-    df$shown_candidates <- lapply(df$shown_candidates, as.character)
-  }
-  df
-}
-
-selected_test_fixed <- fix_columns(selected_test)
-none_test_fixed <- fix_columns(none_test)
-
-# Combine into clean test dataset
-test_data_clean <- dplyr::bind_rows(
-  selected_test_fixed,
-  none_test_fixed
-)
-
-cat("Final independent test decisions:", nrow(test_data_clean), "\n")
 print(table(test_data_clean$decision))
 
 
@@ -971,7 +1073,142 @@ write.csv(
 
 cat("Evaluation results saved successfully!\n")
 
-# STEP 41: Save final model comparison summary
+# STEP 41: Verify decision identifiers
+
+# Check whether our identifiers are unique
+all_keys <- get_decision_keys(decisions)
+
+cat("Total decisions:", length(all_keys), "\n")
+
+cat("Unique identifiers:",
+    length(unique(all_keys)), "\n")
+
+cat("Duplicate identifiers:",
+    sum(duplicated(all_keys)), "\n")
+
+
+# STEP 42: Investigate duplicate decision identifiers
+
+# Find the first repeated identifier
+duplicate_key <- all_keys[which(duplicated(all_keys))[1]]
+
+# Find records sharing this identifier
+duplicate_rows <- which(all_keys == duplicate_key)
+
+# Display the matching records
+print(
+  decisions[
+    head(duplicate_rows, 10),
+    c(
+      "run_id_desc",
+      "N",
+      "M",
+      "agent_id",
+      "time_step",
+      "seed",
+      "source",
+      "decision",
+      "selected_statement_id"
+    )
+  ]
+)
+
+
+# STEP 43: Improve decision identifiers
+
+get_decision_keys <- function(df) {
+  vapply(seq_len(nrow(df)), function(i) {
+    paste(
+      df$run_id_desc[i],
+      df$N[i],
+      df$M[i],
+      df$agent_id[i],
+      df$time_step[i],
+      df$seed[i],
+      df$source[i],
+      sep = "|"
+    )
+  }, character(1))
+}
+
+# Check uniqueness again
+all_keys <- get_decision_keys(decisions)
+
+cat("Total decisions:", length(all_keys), "\n")
+cat("Unique identifiers:", length(unique(all_keys)), "\n")
+cat("Duplicate identifiers:", sum(duplicated(all_keys)), "\n")
+
+
+# STEP 44: Recheck overlap with unique identifiers
+
+# Identify decisions used previously
+used_keys <- unique(c(
+  get_decision_keys(evaluation_1000),
+  get_decision_keys(none_sample)
+))
+
+# Recheck our 1,000 test decisions
+test_keys <- get_decision_keys(test_data)
+
+overlap_count <- sum(test_keys %in% used_keys)
+
+cat("Overlapping test decisions:", overlap_count, "\n")
+
+# Create the corrected independent test dataset
+test_data_final <- test_data[
+  !test_keys %in% used_keys,
+  ,
+  drop = FALSE
+]
+
+cat("Final test decisions:", nrow(test_data_final), "\n")
+
+print(table(test_data_final$decision))
+
+
+# STEP 45: Final threshold model evaluation
+
+# Predict outcomes on the corrected test sample
+final_predictions <- vapply(
+  seq_len(nrow(test_data_final)),
+  function(i) {
+    predict_correlation_threshold(
+      memory_ids = test_data_final$memory_ids[[i]],
+      candidate_ids = test_data_final$shown_candidates[[i]],
+      relationship_matrix = cor_matrix,
+      threshold = 0.03
+    )
+  },
+  character(1)
+)
+
+# Actual outcomes
+final_actual <- ifelse(
+  test_data_final$decision == "none_selected",
+  "none_selected",
+  test_data_final$selected_statement_id
+)
+
+# Exact-match accuracy
+final_correct <- !is.na(final_predictions) &
+  final_predictions == final_actual
+
+final_accuracy <- mean(final_correct) * 100
+
+# Display results
+cat("Final test decisions:", length(final_predictions), "\n")
+cat("Correct predictions:", sum(final_correct), "\n")
+cat("Final exact accuracy:", round(final_accuracy, 2), "%\n")
+cat("Missing predictions:", sum(is.na(final_predictions)), "\n")
+
+# Save final results
+test_data_final$prediction <- final_predictions
+test_data_final$correct <- final_correct
+
+saveRDS(test_data_final, "final_threshold_evaluation.rds")
+
+
+# STEP 46: Save model comparison summary
 
 model_summary <- data.frame(
   Model = c(
@@ -984,23 +1221,479 @@ model_summary <- data.frame(
     random_accuracy_1000,
     cor_accuracy_1000,
     pca_accuracy_1000,
-    round(threshold_accuracy, 2)
+    final_accuracy
   ),
-  Test_Decisions = c(1000, 1000, 1000, nrow(test_data_clean)),
+  Test_Decisions = c(1000, 1000, 1000, 996),
   Evaluation_Type = c(
     "Selected only",
     "Selected only",
     "Selected only",
+    "Selected and none",
     "Selected and none"
-  )
+  )[1:4]
 )
 
 print(model_summary)
 
 write.csv(
   model_summary,
-  "final_model_comparison.csv",
-  row.names = FALSE
 )
 
-cat("Final model comparison saved successfully!\n")
+cat("Model comparison saved successfully!\n")  
+  
+
+# Load the original tuning and testing run IDs
+run_split <- readRDS("evaluation_run_split.rds")
+
+tuning_run_ids <- run_split$tuning_run_ids
+testing_run_ids <- run_split$testing_run_ids
+
+# Verify the split
+cat("Tuning runs:", length(tuning_run_ids), "\n")
+cat("Testing runs:", length(testing_run_ids), "\n")
+
+  # STEP 49E: Create run-independent datasets
+  
+  tuning_data <- decisions[
+    decisions$run_id_desc %in% tuning_run_ids,
+  ]
+  
+  testing_data <- decisions[
+    decisions$run_id_desc %in% testing_run_ids,
+  ]
+  
+  # Check dataset sizes
+  cat("Tuning decisions:", nrow(tuning_data), "\n")
+  cat("Testing decisions:", nrow(testing_data), "\n")
+  
+  # Check decision types
+  cat("\nTuning decision types:\n")
+  print(table(tuning_data$decision))
+  
+  cat("\nTesting decision types:\n")
+  print(table(testing_data$decision))
+  
+  
+  # STEP 49F: Create a balanced tuning sample
+  
+  set.seed(123)
+  
+  tuning_selected <- tuning_data[
+    tuning_data$decision == "selected",
+  ]
+  
+  tuning_none <- tuning_data[
+    tuning_data$decision == "none_selected",
+  ]
+  
+  tuning_selected_sample <- tuning_selected[
+    sample(seq_len(nrow(tuning_selected)), 500),
+  ]
+  
+  tuning_none_sample <- tuning_none[
+    sample(seq_len(nrow(tuning_none)), 500),
+  ]
+  
+  # Combine while preserving list columns
+  tuning_sample <- dplyr::bind_rows(
+    tuning_selected_sample,
+    tuning_none_sample
+  )
+  
+  cat("Tuning sample size:", nrow(tuning_sample), "\n")
+  print(table(tuning_sample$decision))
+  
+  
+  # STEP 49G: Calculate tuning compatibility scores
+  
+  tuning_max_scores <- vapply(
+    seq_len(nrow(tuning_sample)),
+    function(i) {
+      
+      result <- tryCatch(
+        predict_statement(
+          memory_ids = tuning_sample$memory_ids[[i]],
+          candidate_ids = tuning_sample$shown_candidates[[i]],
+          relationship_matrix = cor_matrix
+        ),
+        error = function(e) NULL
+      )
+      
+      if (is.null(result)) return(NA_real_)
+      
+      scores <- result$candidate_scores$Compatibility
+      scores <- scores[is.finite(scores)]
+      
+      if (length(scores) == 0) return(NA_real_)
+      
+      max(scores)
+    },
+    numeric(1)
+  )
+  
+  cat("Scores calculated:", length(tuning_max_scores), "\n")
+  cat("Missing scores:", sum(is.na(tuning_max_scores)), "\n")
+  summary(tuning_max_scores)
+  
+
+  
+  # STEP 49H: Tune threshold using independent tuning runs
+  
+  thresholds <- seq(-0.10, 0.20, by = 0.01)
+  
+  threshold_tuning <- data.frame(
+    Threshold = thresholds,
+    Balanced_Accuracy = NA_real_
+  )
+  
+  for (i in seq_along(thresholds)) {
+    
+    predicted_type <- ifelse(
+      tuning_max_scores < thresholds[i],
+      "none_selected",
+      "selected"
+    )
+    
+    actual_type <- as.character(tuning_sample$decision)
+    
+    sensitivity <- mean(
+      predicted_type[actual_type == "selected"] == "selected"
+    )
+    
+    specificity <- mean(
+      predicted_type[actual_type == "none_selected"] == "none_selected"
+    )
+    
+    threshold_tuning$Balanced_Accuracy[i] <-
+      (sensitivity + specificity) / 2 * 100
+  }
+  
+  # Show the best thresholds
+  threshold_tuning <- threshold_tuning[
+    order(-threshold_tuning$Balanced_Accuracy),
+  ]
+  
+  print(head(threshold_tuning, 10))
+  
+  # Save the best threshold
+  best_threshold <- threshold_tuning$Threshold[1]
+  
+  cat("Best threshold:", best_threshold, "\n")
+  
+  
+  # STEP 49I: Create independent testing sample
+  
+  set.seed(456)
+  
+  testing_selected <- testing_data[
+    testing_data$decision == "selected",
+  ]
+  
+  testing_none <- testing_data[
+    testing_data$decision == "none_selected",
+  ]
+  
+  testing_selected_sample <- testing_selected[
+    sample(seq_len(nrow(testing_selected)), 500),
+  ]
+  
+  testing_none_sample <- testing_none[
+    sample(seq_len(nrow(testing_none)), 500),
+  ]
+  
+  testing_sample <- dplyr::bind_rows(
+    testing_selected_sample,
+    testing_none_sample
+  )
+  
+  cat("Testing sample size:", nrow(testing_sample), "\n")
+  print(table(testing_sample$decision))
+  
+  cat("Shared simulation runs:",
+      length(intersect(
+        unique(tuning_sample$run_id_desc),
+        unique(testing_sample$run_id_desc)
+      )), "\n")
+  
+  
+  # STEP 49J: Evaluate threshold on independent test data
+  
+  test_predictions <- vapply(
+    seq_len(nrow(testing_sample)),
+    function(i) {
+      predict_correlation_threshold(
+        testing_sample$memory_ids[[i]],
+        testing_sample$shown_candidates[[i]],
+        cor_matrix,
+        threshold = best_threshold
+      )
+    },
+    character(1)
+  )
+  
+  # Convert actual decisions to comparable labels
+  test_actual <- ifelse(
+    testing_sample$decision == "none_selected",
+    "none_selected",
+    testing_sample$selected_statement_id
+  )
+  
+  # Calculate exact accuracy
+  test_correct <- !is.na(test_predictions) &
+    test_predictions == test_actual
+  
+  test_accuracy <- mean(test_correct) * 100
+  
+  cat("Final test accuracy:",
+      round(test_accuracy, 2), "%\n")
+  
+  cat("Correct predictions:",
+      sum(test_correct), "\n")
+  
+  cat("Missing predictions:",
+      sum(is.na(test_predictions)), "\n")
+  
+  
+  # STEP 49K: Confusion matrix
+  
+  # Convert predicted statements into decision types
+  test_predicted_type <- ifelse(
+    test_predictions == "none_selected",
+    "none_selected",
+    "selected"
+  )
+  
+  # Compare actual and predicted decision types
+  confusion_matrix <- table(
+    Actual = testing_sample$decision,
+    Predicted = test_predicted_type
+  )
+  
+  print(confusion_matrix)
+  
+  
+  # STEP 49L: Exact accuracy by decision type
+  
+  accuracy_by_type <- aggregate(
+    test_correct,
+    by = list(Decision_Type = testing_sample$decision),
+    FUN = mean
+  )
+  
+  names(accuracy_by_type)[2] <- "Exact_Accuracy"
+  
+  accuracy_by_type$Exact_Accuracy <-
+    round(accuracy_by_type$Exact_Accuracy * 100, 2)
+  
+  print(accuracy_by_type)
+  
+  
+  # STEP 49M: Save independent test results
+  
+  final_test_results <- data.frame(
+    Metric = c(
+      "Overall exact accuracy",
+      "None-selected exact accuracy",
+      
+      
+    
+      "Selected exact accuracy",
+      "Decision-type accuracy"
+    ),
+    Accuracy_Percent = c(
+      test_accuracy,
+      accuracy_by_type$Exact_Accuracy[
+        accuracy_by_type$Decision_Type == "none_selected"
+      ],
+      accuracy_by_type$Exact_Accuracy[
+        accuracy_by_type$Decision_Type == "selected"
+      ],
+      sum(diag(confusion_matrix)) /
+        sum(confusion_matrix) * 100
+    )
+  )
+  
+  print(final_test_results)
+  
+  write.csv(
+    final_test_results,
+    "independent_test_results.csv",
+    row.names = FALSE
+  )
+  
+  saveRDS(
+    testing_sample,
+    "independent_testing_sample.rds"
+  )
+  
+  cat("Results saved successfully!\n")
+  
+  
+  # STEP 49Q: Evaluate PCA on unseen selected decisions
+  
+  pca_test_selected <- testing_sample[
+    testing_sample$decision == "selected",
+  ]
+  
+  pca_test_predictions <- vapply(
+    seq_len(nrow(pca_test_selected)),
+    function(i) {
+      predict_pca(
+        pca_test_selected$memory_ids[[i]],
+        pca_test_selected$shown_candidates[[i]]
+      )
+    },
+    character(1)
+  )
+  
+  # Calculate exact accuracy
+  pca_test_correct <- !is.na(pca_test_predictions) &
+    pca_test_predictions == pca_test_selected$selected_statement_id
+  
+  pca_test_accuracy <- mean(pca_test_correct) * 100
+  
+  cat("PCA test decisions:", length(pca_test_predictions), "\n")
+  cat("PCA correct predictions:", sum(pca_test_correct), "\n")
+  cat("PCA test accuracy:", round(pca_test_accuracy, 2), "%\n")
+  cat("Missing predictions:", sum(is.na(pca_test_predictions)), "\n")
+  
+  
+  # STEP 49R: Evaluate correlation on the same 500 decisions
+  
+  cor_test_predictions <- vapply(
+    seq_len(nrow(pca_test_selected)),
+    function(i) {
+      predict_statement(
+        memory_ids = pca_test_selected$memory_ids[[i]],
+        candidate_ids = pca_test_selected$shown_candidates[[i]],
+        relationship_matrix = cor_matrix
+      )$predicted_selection
+    },
+    character(1)
+  )
+  
+  # Calculate exact accuracy
+  cor_test_correct <- !is.na(cor_test_predictions) &
+    cor_test_predictions == pca_test_selected$selected_statement_id
+  
+  cor_test_accuracy <- mean(cor_test_correct) * 100
+  
+  # Compare both models
+  fair_comparison <- data.frame(
+    Model = c("Correlation", "1D PCA"),
+    Correct = c(sum(cor_test_correct), sum(pca_test_correct)),
+    Accuracy_Percent = c(cor_test_accuracy, pca_test_accuracy)
+  )
+  
+  print(fair_comparison)
+  
+  # STEP 49S: Save fair model comparison
+  
+  write.csv(
+    fair_comparison,
+    "fair_model_comparison.csv",
+    row.names = FALSE
+  )
+  
+  saveRDS(
+    data.frame(
+      Actual = pca_test_selected$selected_statement_id,
+      Correlation = cor_test_predictions,
+      PCA = pca_test_predictions
+    ),
+    "fair_model_predictions.rds"
+  )
+  
+  cat("Fair comparison saved successfully!\n")
+  
+  
+  # STEP 49T: Final model comparison chart
+  
+  png(
+    "final_model_comparison.png",
+    width = 1200,
+    height = 800,
+    res = 150
+  )
+  
+  barplot(
+    fair_comparison$Accuracy_Percent,
+    names.arg = fair_comparison$Model,
+    col = c("steelblue", "red"),
+    ylim = c(0, 100),
+    main = "Model Accuracy on Unseen LLM Decisions",
+    ylab = "Exact Statement Accuracy (%)"
+  )
+  
+  text(
+    x = c(0.7, 1.9),
+    y = fair_comparison$Accuracy_Percent + 3,
+    labels = paste0(
+      round(fair_comparison$Accuracy_Percent, 1),
+      "%"
+    )
+  )
+  
+  dev.off()
+  
+  cat("Comparison chart saved successfully!\n")
+  
+  
+  # STEP 49U: Save confusion matrix visualization
+  
+  png(
+    "final_confusion_matrix.png",
+    width = 1200,
+    height = 900,
+    res = 150
+  )
+  
+  # Plot the confusion matrix
+  m <- as.matrix(confusion_matrix)
+  
+  image(
+    x = 1:nrow(m),
+    y = 1:ncol(m),
+    z = m,
+    col = colorRampPalette(c("pink", "steelblue"))(100),
+    axes = FALSE,
+    xlab = "Actual decision",
+    ylab = "Predicted decision",
+    main = "Decision-Type Confusion Matrix"
+  )
+  
+  axis(1, at = 1:nrow(m), labels = rownames(m))
+  axis(2, at = 1:ncol(m), labels = colnames(m))
+  
+  for (i in seq_len(nrow(m))) {
+    for (j in seq_len(ncol(m))) {
+      text(i, j, labels = m[i, j], cex = 1.5)
+    }
+  }
+  
+  dev.off()
+  
+  cat("Confusion matrix chart saved successfully!\n")
+  
+  # STEP 50A: Inspect already_in_memory decisions
+  
+  memory_data <- decisions[
+    decisions$decision == "already_in_memory",
+  ]
+  
+  # Count records
+  cat("Already in memory decisions:",
+      nrow(memory_data), "\n")
+  
+  # Examine the first five records
+  print(
+    memory_data[1:5, c(
+      "memory_ids",
+      "shown_candidates",
+      "selected_statement_id",
+      "decision"
+    )]
+  )
+  
+  
+  
