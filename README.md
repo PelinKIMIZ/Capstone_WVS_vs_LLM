@@ -24,6 +24,7 @@ Capstone_WVS_vs_LLM/
 ├── 02_model_comparison.R             # Run-independent split (86 tuning / 22 test runs), threshold tuning & evaluation
 │
 ├── correlation_matrix.rds            # Exported 100x100 empirical WVS Spearman correlation matrix
+├── evaluation_run_split.rds          # Serialized out-of-sample run-independent evaluation results
 ├── final_threshold_evaluation.rds    # Saved out-of-sample evaluation metrics (threshold = 0.04)
 ├── final_model_comparison.png        # Accuracy comparison: WVS Correlation (66.6%) vs. 1D PCA (53.8%)
 └── final_confusion_matrix.png        # Out-of-sample confusion matrix (n = 1,000, threshold = 0.04)
