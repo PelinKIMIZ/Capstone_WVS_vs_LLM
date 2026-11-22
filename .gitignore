@@ -49,6 +49,9 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 
+# OS files
+.DS_Store
+
 # ------------------------------------------------------------------------------
 # Large Data Files (DO NOT PUSH TO GITHUB)
 # ------------------------------------------------------------------------------
@@ -57,6 +60,16 @@ rsconnect/
 *.RData
 *.rds
 data/
+
+# Keep small evaluation, split, and metadata artifacts in Git
+!evaluation_run_split.rds
+!correlation_matrix.rds
+!final_threshold_evaluation.rds
+!independent_testing_sample.rds
+!fair_model_predictions.rds
+!independent_test_results.csv
+!fair_model_comparison.csv
+!statements_meta.parquet
 
 # ------------------------------------------------------------------------------
 # Python & Jupyter cache

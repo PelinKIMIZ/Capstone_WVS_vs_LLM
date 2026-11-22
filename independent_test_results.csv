@@ -1,0 +1,5 @@
+"Metric","Accuracy_Percent"
+"Overall exact accuracy",55
+"None-selected exact accuracy",68.4
+"Selected exact accuracy",41.6
+"Decision-type accuracy",67.3
